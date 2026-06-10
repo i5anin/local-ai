@@ -1,0 +1,58 @@
+# Имя проекта закреплено → имена томов всегда local-ai_* (не зависят от папки).
+# Важно для backup/restore при переносе на новую машину.
+name: local-ai
+
+services:
+  # ── Движок LLM. Только он использует GPU. ──────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    # API наружу НЕ торчит — слушает только localhost хоста.
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama   # модели лежат в изолированном volume
+      - ./shared:/shared              # единственная общая папка с хостом (R/W)
+    environment:
+      - OLLAMA_KEEP_ALIVE=10m         # держать модель в памяти 10 мин после запроса
+    # Проброс видеокарты внутрь контейнера (через WSL2).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - ai_net
+
+  # ── Веб-интерфейс (чат, RAG по документам, веб-поиск). ─────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:8080"         # UI на http://localhost:3000
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_AUTH=true               # локальный логин; первый зарегистрированный = админ
+      - ENABLE_WEB_SEARCH=true        # «получение знаний» из интернета
+      - WEB_SEARCH_ENGINE=duckduckgo  # без API-ключа
+    volumes:
+      - open_webui_data:/app/backend/data
+      - ./shared:/shared:ro           # читает документы из общей папки для RAG
+    depends_on:
+      - ollama
+    networks:
+      - ai_net
+
+# Изолированные именованные тома: данные живут внутри Docker, а не в твоей ОС.
+volumes:
+  ollama_models:
+  open_webui_data:
+
+# Своя приватная сеть для контейнеров. Интернет наружу есть, внутрь — нет.
+networks:
+  ai_net:
+    driver: bridge
