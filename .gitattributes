@@ -1,0 +1,4 @@
+# Нормализуем переводы строк к LF во всём репозитории.
+# Docker, YAML, Markdown и PowerShell 7 корректно работают с LF.
+# Убирает шум LF<->CRLF на Windows (core.autocrlf).
+* text=auto eol=lf
