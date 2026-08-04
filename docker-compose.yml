@@ -16,6 +16,11 @@ services:
       - ./shared:/shared              # единственная общая папка с хостом (R/W)
     environment:
       - OLLAMA_KEEP_ALIVE=10m         # держать модель в памяти 10 мин после запроса
+    # Свой DNS: клиент Happ в режиме fake-IP подменяет адрес registry.ollama.ai
+    # на петлю 127.x, и `ollama pull` падает с connection refused.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     # Проброс видеокарты внутрь контейнера (через WSL2).
     deploy:
       resources:
@@ -39,6 +44,18 @@ services:
       - WEBUI_AUTH=true               # локальный логин; первый зарегистрированный = админ
       - ENABLE_WEB_SEARCH=true        # «получение знаний» из интернета
       - WEB_SEARCH_ENGINE=duckduckgo  # без API-ключа
+      # Коннектор OpenAI не используется, а его опрос вешает список моделей:
+      # api.openai.com при активном VPN Happ уходит в fake-IP и ждёт таймаута.
+      - ENABLE_OPENAI_API=false
+      # Модель новых чатов. Только она принимает изображения; текстовые модели
+      # на вложенную картинку отвечают ошибкой 400, и чат дальше не идёт.
+      - DEFAULT_MODELS=qwen3-vl-ru
+    # Свой DNS — та же причина, что у ollama (fake-IP подменяет адреса).
+    # Имена контейнеров продолжают работать: Docker оставляет свой резолвер
+    # 127.0.0.11, а эти адреса использует как вышестоящие.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - open_webui_data:/app/backend/data
       - ./shared:/shared:ro           # читает документы из общей папки для RAG
@@ -47,10 +64,52 @@ services:
     networks:
       - ai_net
 
+  # ── Мониторинг: загрузка GPU, VRAM, температура, контейнеры. ───────
+  # UI на http://localhost:19999 (порт 3000 занят Open WebUI).
+  # Разбивки VRAM по процессам не даёт — ограничение WDDM на Windows,
+  # для этого нужен Диспетчер задач хоста.
+  netdata:
+    image: netdata/netdata:stable
+    container_name: netdata
+    restart: unless-stopped
+    hostname: local-ai-host
+    pid: host                           # видеть процессы, а не только свои
+    ports:
+      - "127.0.0.1:19999:19999"
+    environment:
+      - DO_NOT_TRACK=1                  # без анонимной статистики наружу
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    volumes:
+      - netdata_config:/etc/netdata
+      - netdata_lib:/var/lib/netdata
+      - netdata_cache:/var/cache/netdata
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      # Читает состояние контейнеров стека; сокет — только на чтение.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # GPU нужен, чтобы внутрь контейнера попал nvidia-smi.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - ai_net
+
 # Изолированные именованные тома: данные живут внутри Docker, а не в твоей ОС.
 volumes:
   ollama_models:
   open_webui_data:
+  netdata_config:
+  netdata_lib:
+  netdata_cache:
 
 # Своя приватная сеть для контейнеров. Интернет наружу есть, внутрь — нет.
 networks:

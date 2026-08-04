@@ -4,6 +4,8 @@ backup/
 # Рабочая папка ИИ (общая с контейнером) — содержимое не коммитим
 shared/*
 !shared/.gitkeep
+# Modelfile-ы — конфигурация моделей, нужна в репозитории
+!shared/Modelfile.*
 
 # Локальные переопределения compose
 docker-compose.override.yml
@@ -19,3 +21,4 @@ docker-compose.override.yml
 Thumbs.db
 .idea/
 .vscode/
+logs/
