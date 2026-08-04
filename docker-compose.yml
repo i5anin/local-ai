@@ -90,6 +90,9 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /etc/os-release:/host/etc/os-release:ro
+      # Своя страница графиков GPU: http://localhost:19999/gpu.html
+      # Отдаётся самим Netdata, поэтому без облачного входа и без его аналитики.
+      - ./web/gpu.html:/usr/share/netdata/web/gpu.html:ro
       # Читает состояние контейнеров стека; сокет — только на чтение.
       - /var/run/docker.sock:/var/run/docker.sock:ro
     # GPU нужен, чтобы внутрь контейнера попал nvidia-smi.
