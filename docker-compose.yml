@@ -32,6 +32,24 @@ services:
     networks:
       - ai_net
 
+  # ── Маршрутизатор: подменяет модель, если к текстовой приложили картинку. ──
+  # Open WebUI держит выбранную модель в браузере, поэтому серверные настройки
+  # её не перебивают — правка идёт по пути запроса. Наружу не слушает.
+  vision-router:
+    image: python:3.12-alpine
+    container_name: vision-router
+    restart: unless-stopped
+    command: ["python", "-u", "/app/vision_router.py"]
+    environment:
+      - OLLAMA_TARGET=http://ollama:11434
+      - VISION_MODEL=qwen3-vl-ru
+    volumes:
+      - ./router/vision_router.py:/app/vision_router.py:ro
+    depends_on:
+      - ollama
+    networks:
+      - ai_net
+
   # ── Веб-интерфейс (чат, RAG по документам, веб-поиск). ─────────────
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
@@ -40,7 +58,8 @@ services:
     ports:
       - "127.0.0.1:3000:8080"         # UI на http://localhost:3000
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
+      # Через маршрутизатор, а не напрямую в движок.
+      - OLLAMA_BASE_URL=http://vision-router:11434
       - WEBUI_AUTH=true               # локальный логин; первый зарегистрированный = админ
       - ENABLE_WEB_SEARCH=true        # «получение знаний» из интернета
       - WEB_SEARCH_ENGINE=duckduckgo  # без API-ключа
