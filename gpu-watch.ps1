@@ -3,15 +3,77 @@
 #   .\gpu-watch.ps1 -Once                 разовый снимок
 #   .\gpu-watch.ps1                       наблюдение каждые 5 с, Ctrl+C — стоп
 #   .\gpu-watch.ps1 -IntervalSec 2 -Minutes 10
+#   .\gpu-watch.ps1 -History 30           пики за прошедшие 30 мин (из Netdata)
 [CmdletBinding()]
 param(
   [int]$IntervalSec = 5,
   [int]$Minutes = 0,          # 0 — без ограничения по времени
   [switch]$Once,
+  [int]$History = 0,          # минут назад; требует запущенный контейнер netdata
+  [int]$Buckets = 10,         # на сколько интервалов делить историю
   [string]$LogDir = "$PSScriptRoot\logs"
 )
 
 $OllamaApi = 'http://127.0.0.1:11434/api/ps'
+$NetdataApi = 'http://127.0.0.1:19999/api/v1'
+
+# --- история: пики за период из базы Netdata -----------------------------------
+# nvidia-smi показывает только «сейчас». Прошедшие пики (модель уже выгружена,
+# вентиляторы уже стихли) остаются только в базе Netdata.
+function Get-GpuChartId([string]$metric) {
+  $charts = (Invoke-RestMethod "$NetdataApi/charts" -TimeoutSec 15).charts
+  $charts.PSObject.Properties.Name |
+    Where-Object { $_ -like "nvidia_smi.gpu_*_$metric" } | Select-Object -First 1
+}
+
+function Get-Peaks([string]$chartId, [int]$minutes, [int]$points, [string]$dimension) {
+  if (-not $chartId) { return @() }
+  $url = "$NetdataApi/data?chart=$chartId&after=-$($minutes * 60)" +
+         "&points=$points&group=max&format=json"
+  if ($dimension) { $url += "&dimensions=$dimension" }
+  (Invoke-RestMethod $url -TimeoutSec 25).data
+}
+
+function Show-History([int]$minutes, [int]$points) {
+  $metrics = [ordered]@{
+    'ЗагрузкаGPU' = @('gpu_utilization', $null)
+    'МощностьВт'  = @('power_draw', $null)
+    'ТемпC'       = @('temperature', $null)
+    'VramМБ'      = @('frame_buffer_memory_usage', 'used')
+  }
+
+  $series = @{}
+  foreach ($name in $metrics.Keys) {
+    $metric, $dimension = $metrics[$name]
+    $series[$name] = Get-Peaks (Get-GpuChartId $metric) $minutes $points $dimension
+  }
+
+  $times = $series['ЗагрузкаGPU']
+  if (-not $times) {
+    Write-Host 'Нет данных: контейнер netdata не запущен или история пуста.' `
+      -ForegroundColor Red
+    return
+  }
+
+  $rows = foreach ($i in 0..($times.Count - 1)) {
+    $stamp = [DateTimeOffset]::FromUnixTimeSeconds([int64]$times[$i][0]).LocalDateTime
+    [pscustomobject]@{
+      'Время'       = $stamp.ToString('HH:mm')
+      'Загрузка %'  = [int][math]::Round([double]$times[$i][1])
+      'Мощность Вт' = [int][math]::Round([double]$series['МощностьВт'][$i][1])
+      'Темп °C'     = [int][math]::Round([double]$series['ТемпC'][$i][1])
+      'VRAM МБ'     = [int][math]::Round([double]$series['VramМБ'][$i][1] / 1MB)
+    }
+  }
+  Write-Host "Пики за последние $minutes мин (максимум в каждом интервале):" `
+    -ForegroundColor Cyan
+  $rows | Sort-Object 'Время' -Descending | Format-Table -AutoSize
+}
+
+if ($History -gt 0) {
+  Show-History $History $Buckets
+  return
+}
 
 function Get-GpuSample {
   $fields = 'utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw'
