@@ -22,6 +22,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 TARGET = os.getenv("OLLAMA_TARGET", "http://ollama:11434").rstrip("/")
 VISION_MODEL = os.getenv("VISION_MODEL", "qwen3-vl-ru")
 PORT = int(os.getenv("LISTEN_PORT", "11434"))
+# Крупная модель с выгрузкой в ОЗУ отвечает дольше 30 минут — таймаут к движку
+# должен быть больше клиентского, иначе маршрутизатор рвёт живой запрос.
+UPSTREAM_TIMEOUT = int(os.getenv("UPSTREAM_TIMEOUT", "7200"))
 ROUTED_PATHS = ("/api/chat", "/api/generate", "/v1/chat/completions")
 
 # Заголовки, которые нельзя пересылать как есть: относятся к самому соединению.
@@ -109,7 +112,7 @@ class Handler(BaseHTTPRequestHandler):
             TARGET + self.path, data=body, headers=headers, method=self.command)
 
         try:
-            upstream = urllib.request.urlopen(request, timeout=1800)
+            upstream = urllib.request.urlopen(request, timeout=UPSTREAM_TIMEOUT)
         except urllib.error.HTTPError as error:      # ошибку движка отдаём как есть
             upstream = error
         except Exception as error:
