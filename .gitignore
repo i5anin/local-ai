@@ -7,6 +7,9 @@ shared/*
 # Modelfile-ы — конфигурация моделей, нужна в репозитории
 !shared/Modelfile.*
 
+# Секреты стека (пароль СУБД, ключи прокси и трейсинга). Шаблон — .env.example
+.env
+
 # Локальные переопределения compose
 docker-compose.override.yml
 *.local

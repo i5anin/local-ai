@@ -1,0 +1,43 @@
+# Прокси-слой между Open WebUI и движком: единая точка, где видно каждый вызов
+# целиком — системный промпт, история, вложения, инструменты, токены, время.
+#
+# Суффикс `-traced` в имени: Open WebUI подключён и к Ollama напрямую, и сюда.
+# Без суффикса в списке моделей были бы две неразличимые записи, и понять,
+# какая из них попадёт в трейсы, стало бы невозможно.
+#
+# Провайдер `ollama_chat` (а не `ollama`) обращается к /api/chat — тому пути,
+# на котором стоит vision-router с подменой модели для изображений.
+
+model_list:
+  - model_name: qwen2.5-ru-traced
+    litellm_params:
+      model: ollama_chat/qwen2.5-ru
+      api_base: http://vision-router:11434
+
+  - model_name: qwen2.5-coder-ru-traced
+    litellm_params:
+      model: ollama_chat/qwen2.5-coder-ru
+      api_base: http://vision-router:11434
+
+  - model_name: qwen3-vl-ru-traced
+    litellm_params:
+      model: ollama_chat/qwen3-vl-ru
+      api_base: http://vision-router:11434
+
+litellm_settings:
+  # Трейсы уходят в Langfuse: успешные и неуспешные вызовы одинаково важны —
+  # обрыв по таймауту виден только в failure_callback.
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+  # Модель с выгрузкой части слоёв в ОЗУ отвечает десятки минут.
+  # Значение согласовано с UPSTREAM_TIMEOUT маршрутизатора.
+  request_timeout: 7200
+  # Ollama не принимает часть параметров OpenAI (например, frequency_penalty).
+  # Без этого запрос из клиента с полным набором полей падает с 400.
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Тела запроса и ответа в собственной таблице логов: LiteLLM UI показывает
+  # их без Langfuse, это независимая вторая точка наблюдения.
+  store_prompts_in_spend_logs: true

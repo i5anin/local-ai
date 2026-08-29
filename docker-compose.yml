@@ -50,6 +50,89 @@ services:
     networks:
       - ai_net
 
+  # ── СУБД для прокси и трейсинга. Наружу не слушает. ────────────────
+  # Один экземпляр на двух потребителей: базы `litellm` и `langfuse`
+  # создаются скриптом из ./postgres при инициализации пустого тома.
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=ai
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-databases.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # Оба потребителя падают, если начать миграции до готовности СУБД.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - ai_net
+
+  # ── Прокси-слой: единая точка, где виден каждый вызов целиком. ──────
+  # Собственный UI на http://localhost:4000/ui (ключ — LITELLM_MASTER_KEY):
+  # тела запросов и ответов, токены, время. Трейсы дублируются в Langfuse.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4000:4000"
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - LITELLM_SALT_KEY=${LITELLM_SALT_KEY}
+      - DATABASE_URL=postgresql://ai:${POSTGRES_PASSWORD}@postgres:5432/litellm
+      - STORE_MODEL_IN_DB=true
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_HOST=http://langfuse:3000
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ai_net
+
+  # ── Трейсинг: что именно ушло в модель и что вернулось. ────────────
+  # UI на http://localhost:3001 (порт 3000 занят Open WebUI).
+  # Ветка 2.x: нужен только Postgres. Ветка 3+ тянет ClickHouse, Redis
+  # и MinIO — четыре лишних контейнера и рост диска без выигрыша здесь.
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: langfuse
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      - DATABASE_URL=postgresql://ai:${POSTGRES_PASSWORD}@postgres:5432/langfuse
+      - NEXTAUTH_URL=http://localhost:3001
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - SALT=${LANGFUSE_SALT}
+      - ENCRYPTION_KEY=${LANGFUSE_ENCRYPTION_KEY}
+      - TELEMETRY_ENABLED=false
+      # Проект и ключи создаются при первом старте из этих переменных,
+      # поэтому ключи не нужно переносить из UI в конфиг LiteLLM руками.
+      - LANGFUSE_INIT_ORG_ID=local
+      - LANGFUSE_INIT_ORG_NAME=Local AI
+      - LANGFUSE_INIT_PROJECT_ID=local-ai
+      - LANGFUSE_INIT_PROJECT_NAME=local-ai
+      - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
+      - LANGFUSE_INIT_PROJECT_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_USER_EMAIL}
+      - LANGFUSE_INIT_USER_NAME=Local
+      - LANGFUSE_INIT_USER_PASSWORD=${LANGFUSE_USER_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ai_net
+
   # ── Веб-интерфейс (чат, RAG по документам, веб-поиск). ─────────────
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
@@ -63,9 +146,14 @@ services:
       - WEBUI_AUTH=true               # локальный логин; первый зарегистрированный = админ
       - ENABLE_WEB_SEARCH=true        # «получение знаний» из интернета
       - WEB_SEARCH_ENGINE=duckduckgo  # без API-ключа
-      # Коннектор OpenAI не используется, а его опрос вешает список моделей:
-      # api.openai.com при активном VPN Happ уходит в fake-IP и ждёт таймаута.
-      - ENABLE_OPENAI_API=false
+      # Второй путь к тем же моделям — через LiteLLM (в списке с суффиксом
+      # `-traced`, эти вызовы попадают в трейсы) и через контейнер pipelines
+      # с цепочками из нескольких проходов. Адреса заданы явно, поэтому
+      # api.openai.com не опрашивается: прежняя проблема с fake-IP клиента
+      # Happ (опрос вешал список моделей до таймаута) не возвращается.
+      - ENABLE_OPENAI_API=true
+      - OPENAI_API_BASE_URLS=http://litellm:4000/v1;http://pipelines:9099
+      - OPENAI_API_KEYS=${LITELLM_MASTER_KEY};${PIPELINES_API_KEY}
       # Модель новых чатов. Только она принимает изображения; текстовые модели
       # на вложенную картинку отвечают ошибкой 400, и чат дальше не идёт.
       - DEFAULT_MODELS=qwen3-vl-ru
@@ -80,6 +168,31 @@ services:
       - ./shared:/shared:ro           # читает документы из общей папки для RAG
     depends_on:
       - ollama
+      - litellm
+      - pipelines
+    networks:
+      - ai_net
+
+  # ── Цепочки проходов: несколько вызовов модели друг за другом. ──────
+  # Появляется в списке моделей Open WebUI как отдельная запись.
+  # Тег main-minimum вместо main: полный образ тянет ML-зависимости
+  # на несколько гигабайт, здесь нужны только HTTP-вызовы к LiteLLM.
+  pipelines:
+    image: ghcr.io/open-webui/pipelines:main-minimum
+    container_name: pipelines
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9099:9099"
+    environment:
+      - PIPELINES_API_KEY=${PIPELINES_API_KEY}
+      # Цепочка ходит через прокси, а не в движок напрямую — иначе шаги
+      # не попадут в трейсы.
+      - LITELLM_BASE_URL=http://litellm:4000/v1
+      - LITELLM_API_KEY=${LITELLM_MASTER_KEY}
+    volumes:
+      - ./pipelines:/app/pipelines
+    depends_on:
+      - litellm
     networks:
       - ai_net
 
@@ -126,6 +239,7 @@ services:
 volumes:
   ollama_models:
   open_webui_data:
+  postgres_data:
   netdata_config:
   netdata_lib:
   netdata_cache:

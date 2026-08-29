@@ -15,22 +15,29 @@
 | **Docker Desktop** (бэкенд WSL2) | запуск контейнеров |
 | **NVIDIA GPU + свежий драйвер** | инференс на видеокарте (иначе CPU, медленно) |
 | **WSL2 + Virtual Machine Platform** | требует Docker; см. «Грабли запуска» |
-| ~15 ГБ свободного диска | образы (~5 ГБ) + модели (~10 ГБ) |
+| ~25 ГБ свободного диска | образы (~13 ГБ) + модели (~10 ГБ) |
 
 ---
 
 ## Быстрый старт
 
 ```powershell
-cd E:\development\local-ai
-docker compose up -d        # поднять контейнеры (первый раз тянет образы)
-.\pull-models.ps1           # скачать модели (~9 ГБ)
+cd E:\development\local-ai2
+Copy-Item .env.example .env  # заполнить значения (пояснения — внутри файла)
+docker compose up -d         # поднять контейнеры (первый раз тянет образы)
+.\pull-models.ps1            # скачать модели (~9 ГБ)
 ```
+
+Без `.env` запуск падает: пароль СУБД и ключи прокси берутся оттуда.
 
 Открыть:
 
 - **Интерфейс:** http://localhost:3000 — при первом входе зарегистрируй
   локальный аккаунт (он станет админом; данные в локальной БД).
+- **Трейсы:** http://localhost:3001 (Langfuse — что именно ушло в модель и
+  что вернулось; вход по `LANGFUSE_USER_EMAIL` / `LANGFUSE_USER_PASSWORD`).
+- **Прокси:** http://localhost:4000/ui (LiteLLM — логи вызовов, токены,
+  время; вход по `LITELLM_MASTER_KEY`).
 - **API Ollama:** http://localhost:11434 (для IDE-плагинов и скриптов).
 - **Мониторинг:** http://localhost:19999 (Netdata — загрузка GPU, VRAM,
   температура; вход не нужен, «Skip and use the dashboard anonymously»).
@@ -115,7 +122,19 @@ docker compose pull               # обновить образы
 docker exec -it ollama ollama list             # список моделей
 docker exec -it ollama ollama ps               # что загружено в VRAM (GPU/CPU)
 docker exec -it ollama ollama rm <модель>      # удалить модель
+
+docker compose logs -f litellm    # вызовы через прокси, ошибки провайдера
+docker compose logs -f pipelines  # шаги цепочки, ошибки pipeline
+docker compose logs -f langfuse   # приём трейсов и миграции базы
+
+# Модели, видимые через прокси (ключ — LITELLM_MASTER_KEY из .env)
+curl -s -H "Authorization: Bearer $env:LITELLM_MASTER_KEY" `
+     http://localhost:4000/v1/models
 ```
+
+Занятость диска стеком: `docker system df` (том `ollama_models` — самый
+крупный; освобождённое внутри место образ `docker_data.vhdx` переиспользует,
+но сам файл на диске не уменьшает).
 
 Проверить, что инференс идёт на GPU: `ollama ps` → колонка `PROCESSOR`
 должна показывать `100% GPU`.
@@ -177,6 +196,66 @@ Netdata.
 
 ---
 
+## Отслеживание результатов (что видит модель)
+
+Слой между интерфейсом и движком. Отвечает на вопросы: что именно ушло
+в модель, что вернулось, сколько ушло времени и токенов.
+
+| Компонент | Порт | На какой вопрос отвечает |
+|---|---|---|
+| **LiteLLM** | 4000 | Тело каждого вызова целиком: системный промпт, история, вложения, инструменты. Токены на вход и выход, время, ошибки. Свой UI — `/ui` |
+| **Langfuse** | 3001 | То же, но с историей и группировкой: цепочка из пяти проходов — один трейс с пятью вложенными вызовами. Прогоны сравниваются между собой |
+| **Pipelines** | 9099 | Цепочки: несколько вызовов друг за другом с разными ролями и настройками |
+| **Postgres** | — | Хранилище первых двух (базы `litellm`, `langfuse`); наружу не слушает |
+| **Netdata** | 19999 | Железо: загрузка GPU, VRAM, температура |
+| **`ollama ps`** | — | Сколько VRAM занято моделью и целиком ли она в GPU |
+
+Путь запроса:
+
+```
+Open WebUI ─┬─> LiteLLM ──────> vision-router ──> Ollama ──> GPU
+            │      └── трейс в Langfuse
+            └─> Pipelines ──> LiteLLM ──> …   (5 вызовов в одном трейсе)
+```
+
+В списке моделей Open WebUI появляются два набора записей:
+
+| Запись | Путь | В трейсах |
+|---|---|---|
+| `qwen2.5-ru` | напрямую в движок | ❌ |
+| `qwen2.5-ru-traced` | через LiteLLM | ✅ |
+| `Совет из 5 проходов` | через Pipelines | ✅ одним трейсом |
+
+Прямые записи оставлены намеренно: если прокси не поднялся, чат продолжает
+работать.
+
+### Цепочка из нескольких проходов
+
+`pipelines/council.py` — один вопрос проходит пять ролей: разбор → решение →
+критика → правка → сводка. Каждый шаг видит результат предыдущего, поэтому
+ошибка ловится на следующем шаге, а не уходит в финальный ответ. Критика
+отделена от правки: в одном ответе модель почти всегда признаёт своё решение
+верным.
+
+В чат выводится таблица по шагам (время, токены на вход и выход), полные
+тела запросов — в Langfuse.
+
+Настройки — в Open WebUI: **Admin → Settings → Pipelines → Valves**:
+
+| Настройка | По умолчанию | Смысл |
+|---|---|---|
+| `SINGLE_MODEL` | `true` | Все проходы на одной модели |
+| `MODEL_MAIN` | `qwen2.5-ru-traced` | Разбор, критика, сводка |
+| `MODEL_CODE` | `qwen2.5-coder-ru-traced` | Решение и правка (при `SINGLE_MODEL=false`) |
+| `TEMPERATURES` | `0.2,0.2,0.7,0.1,0.3` | По шагам; высокая на критике — намеренно, на низкой модель повторяет решение вместо поиска изъянов |
+| `SHOW_STEPS` | `true` | Промежуточные ответы под спойлерами |
+
+⚠️ `SINGLE_MODEL=false` даёт разные модели ценой перезагрузок: на 8 ГБ две
+модели 7B одновременно не держатся, каждое переключение — выгрузка весов и
+повторное чтение с диска (+5–15 с к шагу, четыре раза за цепочку).
+
+---
+
 ## Веб-поиск и знания из документов
 
 - **Веб-поиск** включён (DuckDuckGo, без ключа). В чате включи Web Search 🌐.
@@ -202,16 +281,36 @@ bcdedit /set hypervisorlaunchtype auto
 ```
 **Затем перезагрузить ПК** (без ребута изменение не вступит в силу).
 
-### 2. Краш «initializing Inference manager … dockerInference»
-Падение Docker Model Runner на залипшем сокете. Нам он не нужен. Фикс —
-в `%APPDATA%\Docker\settings-store.json`:
+### 2. Краш на залипшем unix-сокете (dockerInference, engine.sock)
+Симптом: диалог «An unexpected error occurred» с текстом
+`initializing Inference manager: listening on unix://…\Docker\run\dockerInference:
+remove …: The file cannot be accessed by the system` — либо то же самое про
+`initializing Secrets Engine … docker-secrets-engine\engine.sock`.
 
-```json
-"EnableDockerAI": false,
-"EnableInference": false
+Причина: после аварийного завершения остаётся файл-заглушка unix-сокета
+(атрибут ReparsePoint, 0 байт). Windows отдаёт на него ошибку 1920:
+`Remove-Item`, `del` и `fsutil reparsepoint delete` не помогают.
+
+Отключение в `%APPDATA%\Docker\settings-store.json` **не спасает** —
+проверено при `"EnableInference": false` и `"EnableDockerAI": false`
+движок всё равно пытается открыть слушатель и падает.
+
+Работает только переименование каталога — Docker создаст его заново:
+
+```powershell
+# Docker должен быть остановлен
+Get-Process 'Docker Desktop','com.docker.backend' -ErrorAction SilentlyContinue |
+    Stop-Process -Force
+Rename-Item "$env:LOCALAPPDATA\Docker\run" "$env:LOCALAPPDATA\Docker\run.stale"
+Rename-Item "$env:LOCALAPPDATA\docker-secrets-engine" `
+            "$env:LOCALAPPDATA\docker-secrets-engine.stale"
 ```
-Если сокет не удаляется (даже `fsutil`) — переименовать/удалить папку
-`%LOCALAPPDATA%\Docker\run` (и `docker-secrets-engine`), Docker создаст заново.
+
+Сокеты залипают по одному, поэтому Docker падает несколько раз подряд —
+на каждом следующем каталоге. Чистить сразу оба.
+
+⚠️ В диалоге ошибки **не нажимать «Reset to factory defaults»** — это
+удалит тома вместе с моделями.
 
 ### 3. `ollama pull` падает с EOF (registry.ollama.ai)
 Причина: системный прокси/VPN (напр. `127.0.0.1:2080`) ломает TLS, а Docker
