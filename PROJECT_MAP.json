@@ -1,0 +1,237 @@
+{
+  "schemaVersion": 1,
+  "snapshot": "2026-10-30T14:47:11.360Z",
+  "project": "local-ai2",
+  "root": ".",
+  "method": "static-local-index",
+  "limitations": [
+    "Нет динамических вызовов и сетевых интеграций",
+    "Сверять sha256 и evidence.line с текущими исходниками",
+    "Наличие зависимости не доказывает работоспособность"
+  ],
+  "nodes": [
+    {
+      "id": "project:local-ai2",
+      "type": "project",
+      "name": "local-ai2"
+    },
+    {
+      "id": "project:local-ai2/file:PLAN.md",
+      "type": "file",
+      "path": "PLAN.md"
+    },
+    {
+      "id": "project:local-ai2/file:README.md",
+      "type": "file",
+      "path": "README.md",
+      "sha256": "cc670a7974887d48759f77999b0e3742e60eff30b87d8528a55c168b7e9202c4",
+      "bytes": 22194
+    },
+    {
+      "id": "project:local-ai2/file:RESOURCES.md",
+      "type": "file",
+      "path": "RESOURCES.md"
+    },
+    {
+      "id": "project:local-ai2/file:UPGRADE.md",
+      "type": "file",
+      "path": "UPGRADE.md"
+    },
+    {
+      "id": "project:local-ai2/file:ai.ps1",
+      "type": "file",
+      "path": "ai.ps1",
+      "sha256": "ea10ec4746d19be92dcaa7f1ed4f0a4f98efed4c8f4d963efd2d8bbe0bf3a3bb",
+      "bytes": 610
+    },
+    {
+      "id": "project:local-ai2/file:backup-volumes.ps1",
+      "type": "file",
+      "path": "backup-volumes.ps1",
+      "sha256": "bd4779ceb8ae834c83a645b76b188df135e27c15dc26e232f770525ba282355a",
+      "bytes": 1266
+    },
+    {
+      "id": "project:local-ai2/file:docker-compose.yml",
+      "type": "file",
+      "path": "docker-compose.yml",
+      "sha256": "906b0985e24a7acfd1e6e157c0df7d12799051e443d4e02de03e4d23513c9d16",
+      "bytes": 11603
+    },
+    {
+      "id": "project:local-ai2/file:fix-docker-sock.ps1",
+      "type": "file",
+      "path": "fix-docker-sock.ps1",
+      "sha256": "1a1e9f0a433e23bec1971c5e9f7ff311df8998c80a83893fe95981bf3ef7809c",
+      "bytes": 2534
+    },
+    {
+      "id": "project:local-ai2/file:gpu-watch.ps1",
+      "type": "file",
+      "path": "gpu-watch.ps1",
+      "sha256": "efd8bf1d94003929dffff021a66653efee1d4d1a72048bf14c774cfc5e7aecaf",
+      "bytes": 6093
+    },
+    {
+      "id": "project:local-ai2/file:litellm/config.yaml",
+      "type": "file",
+      "path": "litellm/config.yaml"
+    },
+    {
+      "id": "project:local-ai2/file:pipelines/council.py",
+      "type": "file",
+      "path": "pipelines/council.py",
+      "sha256": "cc0c1f76b2b7d4d6b0ab8fa4c26132435c7cf26ef587762b451424f7a36afa27",
+      "bytes": 10495
+    },
+    {
+      "id": "project:local-ai2/file:pull-models.ps1",
+      "type": "file",
+      "path": "pull-models.ps1",
+      "sha256": "31d0322ae719e14efee14c0a32198d7e728eed4f1d81c7c4f6f3c2ce25467686",
+      "bytes": 1783
+    },
+    {
+      "id": "project:local-ai2/file:restore-volumes.ps1",
+      "type": "file",
+      "path": "restore-volumes.ps1",
+      "sha256": "1a53e4f4b6955de2c79b6f1a72eec2f0233be64352da1ec9638bd2a5e91ac10b",
+      "bytes": 1533
+    },
+    {
+      "id": "project:local-ai2/file:router/vision_router.py",
+      "type": "file",
+      "path": "router/vision_router.py",
+      "sha256": "0ca0672cd1b79d4aca7c0001d62ceab1c9a57f94f258912b6722c0eb6fe17cff",
+      "bytes": 6500
+    }
+  ],
+  "edges": [
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:PLAN.md",
+      "relation": "contains",
+      "evidence": {
+        "path": "PLAN.md"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:README.md",
+      "relation": "contains",
+      "evidence": {
+        "path": "README.md"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:RESOURCES.md",
+      "relation": "contains",
+      "evidence": {
+        "path": "RESOURCES.md"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:UPGRADE.md",
+      "relation": "contains",
+      "evidence": {
+        "path": "UPGRADE.md"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:ai.ps1",
+      "relation": "contains",
+      "evidence": {
+        "path": "ai.ps1"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:backup-volumes.ps1",
+      "relation": "contains",
+      "evidence": {
+        "path": "backup-volumes.ps1"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:docker-compose.yml",
+      "relation": "contains",
+      "evidence": {
+        "path": "docker-compose.yml"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:fix-docker-sock.ps1",
+      "relation": "contains",
+      "evidence": {
+        "path": "fix-docker-sock.ps1"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:gpu-watch.ps1",
+      "relation": "contains",
+      "evidence": {
+        "path": "gpu-watch.ps1"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:litellm/config.yaml",
+      "relation": "contains",
+      "evidence": {
+        "path": "litellm/config.yaml"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:pipelines/council.py",
+      "relation": "contains",
+      "evidence": {
+        "path": "pipelines/council.py"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:pull-models.ps1",
+      "relation": "contains",
+      "evidence": {
+        "path": "pull-models.ps1"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:restore-volumes.ps1",
+      "relation": "contains",
+      "evidence": {
+        "path": "restore-volumes.ps1"
+      },
+      "method": "filesystem"
+    },
+    {
+      "source": "project:local-ai2",
+      "target": "project:local-ai2/file:router/vision_router.py",
+      "relation": "contains",
+      "evidence": {
+        "path": "router/vision_router.py"
+      },
+      "method": "filesystem"
+    }
+  ]
+}
